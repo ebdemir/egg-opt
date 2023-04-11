@@ -1,8 +1,41 @@
-use std::{fs, env};
+extern crate xml;
+
 use egg::*;
+use std::{env, fs, io};
+use xml::{
+    attribute::OwnedAttribute,
+    name::OwnedName,
+    reader::{EventReader, XmlEvent},
+};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let src_rvsdg: String = fs::read_to_string(&args[1]).unwrap();
-    println!("{}", src_rvsdg);
+    let file = fs::File::open(&args[1]).unwrap();
+    let parser = EventReader::new(file);
+    // let _src_rvsdg: String = fs::read_to_string(&args[1]).unwrap();
+    for e in parser {
+        match e {
+            Ok(XmlEvent::StartElement {
+                name, attributes, ..
+            }) => {
+                //println!("Start -> Name: {}, Attr: {:?}", name, attributes);
+
+                let attr: Vec<(String, String)> = attributes.into_iter().map(|attr| match attr {
+                    OwnedAttribute {
+                        name: OwnedName { local_name, .. },
+                        value,
+                    } => (local_name, value),
+                }).collect();
+                println!("Start -> Name: {}, Attr: {:?}", name, attr);
+            }
+            Ok(XmlEvent::EndElement { name }) => {
+                println!("End: {}", name);
+            }
+            Err(e) => {
+                println!("Error: {}", e);
+                break;
+            }
+            _ => {}
+        }
+    }
 }
