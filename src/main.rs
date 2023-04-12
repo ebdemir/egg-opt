@@ -1,5 +1,8 @@
 extern crate xml;
 
+mod language;
+use language::*;
+
 use egg::*;
 use std::{env, fs, io};
 use xml::{
@@ -13,6 +16,7 @@ fn main() {
     let file = fs::File::open(&args[1]).unwrap();
     let parser = EventReader::new(file);
     // let _src_rvsdg: String = fs::read_to_string(&args[1]).unwrap();
+    let rvsdg = RVSDG::parse(&mut parser);
     for e in parser {
         match e {
             Ok(XmlEvent::StartElement {
