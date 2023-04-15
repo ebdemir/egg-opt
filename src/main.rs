@@ -3,20 +3,16 @@ extern crate xml;
 mod language;
 use language::*;
 
-use egg::*;
-use std::{env, fs, io};
+// use egg::*;
+use std::{env, fs};
 use xml::{
     attribute::OwnedAttribute,
     name::OwnedName,
     reader::{EventReader, XmlEvent},
 };
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    let file = fs::File::open(&args[1]).unwrap();
-    let parser = EventReader::new(file);
-    // let _src_rvsdg: String = fs::read_to_string(&args[1]).unwrap();
-    let rvsdg = RVSDG::parse(&mut parser);
+#[allow(dead_code)]
+fn print_xml(parser: EventReader<fs::File>) {
     for e in parser {
         match e {
             Ok(XmlEvent::StartElement {
@@ -24,12 +20,15 @@ fn main() {
             }) => {
                 //println!("Start -> Name: {}, Attr: {:?}", name, attributes);
 
-                let attr: Vec<(String, String)> = attributes.into_iter().map(|attr| match attr {
-                    OwnedAttribute {
-                        name: OwnedName { local_name, .. },
-                        value,
-                    } => (local_name, value),
-                }).collect();
+                let attr: Vec<(String, String)> = attributes
+                    .into_iter()
+                    .map(|attr| match attr {
+                        OwnedAttribute {
+                            name: OwnedName { local_name, .. },
+                            value,
+                        } => (local_name, value),
+                    })
+                    .collect();
                 println!("Start -> Name: {}, Attr: {:?}", name, attr);
             }
             Ok(XmlEvent::EndElement { name }) => {
@@ -42,4 +41,15 @@ fn main() {
             _ => {}
         }
     }
+}
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    let file = fs::File::open(&args[1]).unwrap();
+    let mut parser = EventReader::new(file);
+    // let _src_rvsdg: String = fs::read_to_string(&args[1]).unwrap();
+    let rvsdg = RVSDG::parse(&mut parser);
+
+    println!("{:?}", rvsdg);
+
 }
