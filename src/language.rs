@@ -1,4 +1,4 @@
-use std::fs::File;
+use std::{collections::HashMap, fmt::Debug, fs::File};
 
 //use egg::Language;
 
@@ -9,48 +9,52 @@ use xml::{
 };
 
 #[derive(Debug, Clone, Hash)]
-pub struct Attributes {
-    id: String,
+pub struct Attributes<Id: std::str::FromStr> {
+    id: Id,
     name: Option<String>,
     ty: Option<String>, // type
 }
 
-impl From<&Vec<OwnedAttribute>> for Attributes {
+impl<Id: std::str::FromStr + Debug> From<&Vec<OwnedAttribute>> for Attributes<Id>
+where
+    <Id as std::str::FromStr>::Err: Debug,
+{
     fn from(attrs: &Vec<OwnedAttribute>) -> Self {
-        let mut res = Attributes {
-            id: String::new(),
-            name: None,
-            ty: None,
-        };
+        let mut map = HashMap::<&str, String>::new();
 
         for attr in attrs {
-            match attr.name.local_name.as_str() {
-                "id" => res.id = attr.value.clone(),
-                "name" => res.name = Some(attr.value.clone()),
-                "type" => res.ty = Some(attr.value.clone()),
-                _ => {
-                    unreachable!()
-                }
-            }
+            map.insert(attr.name.local_name.as_str(), attr.value.clone());
         }
-        res
+        Attributes {
+            id: Id::from_str(map["id"].as_str()).unwrap(),
+            name: if map.contains_key("name"){
+                Some(map["name"].clone())
+            } else {
+                None
+            },
+            ty: if map.contains_key("type"){
+                Some(map["type"].clone())
+            } else {
+                None
+            },
+        }
     }
 }
 
 #[derive(Debug, Clone, Hash)]
-pub enum RVSDG {
-    Rvsdg(Option<Vec<RVSDG>>),
+pub enum RVSDG<Id: std::str::FromStr + Debug> {
+    Rvsdg(Option<Vec<RVSDG<Id>>>),
     Node {
-        attr: Attributes,
-        body: Option<Vec<RVSDG>>, // body
+        attr: Attributes<Id>,
+        body: Option<Vec<RVSDG<Id>>>, // body
     },
-    Region(String, Option<Vec<RVSDG>>, Option<Vec<RVSDG>>), // id, body, results
+    Region(Id, Option<Vec<RVSDG<Id>>>, Option<Vec<RVSDG<Id>>>), // id, body, results
 
-    Edge(String, String), // source and target id
-    Result(String),       // id
-    Input(String),        // id
-    Output(String),       // id
-    Argument(String),     // id
+    Edge(Id, Id), // source and target id
+    Result(Id),   // id
+    Input(Id),    // id
+    Output(Id),   // id
+    Argument(Id), // id
 }
 
 // TODO
@@ -60,9 +64,12 @@ pub enum RVSDG {
 // fn children_mut(&mut self) -> &mut [egg::Id] { unimplemented!() }
 // }
 
-impl RVSDG {
+impl<Id: std::str::FromStr + Debug> RVSDG<Id>
+where
+    <Id as std::str::FromStr>::Err: Debug,
+{
     fn parse_rvsdg(reader: &mut EventReader<File>) -> Self {
-        let mut body: Vec<RVSDG> = Vec::new();
+        let mut body: Vec<RVSDG<Id>> = Vec::new();
         loop {
             let e = reader.next();
             match e {
@@ -85,8 +92,8 @@ impl RVSDG {
     }
 
     fn parse_node(reader: &mut EventReader<File>, attributes: &Vec<OwnedAttribute>) -> Self {
-        let attr = Attributes::from(attributes);
-        let mut body: Vec<RVSDG> = Vec::new();
+        let attr = Attributes::<Id>::from(attributes);
+        let mut body: Vec<RVSDG<Id>> = Vec::new();
         loop {
             let e = reader.next();
             match e {
@@ -113,7 +120,7 @@ impl RVSDG {
     }
     fn parse_region(reader: &mut EventReader<File>, attributes: &Vec<OwnedAttribute>) -> Self {
         let attr = Attributes::from(attributes);
-        let mut rest: Vec<RVSDG> = Vec::new();
+        let mut rest: Vec<RVSDG<Id>> = Vec::new();
         loop {
             let e = reader.next();
             match e {
@@ -133,8 +140,8 @@ impl RVSDG {
                 Err(_) => panic!("Error while parsing `Region`"),
             }
         }
-        let mut results: Vec<RVSDG> = Vec::new();
-        let mut body: Vec<RVSDG> = Vec::new();
+        let mut results: Vec<RVSDG<Id>> = Vec::new();
+        let mut body: Vec<RVSDG<Id>> = Vec::new();
         for e in rest {
             match e {
                 RVSDG::Result(_) => results.push(e),
@@ -168,7 +175,7 @@ impl RVSDG {
                         src = a.value.clone();
                     }
                 }
-                return RVSDG::Edge(src, target);
+                return RVSDG::Edge(Id::from_str(&src).unwrap(), Id::from_str(&target).unwrap());
             }
         }
         unreachable!()
@@ -202,9 +209,7 @@ impl RVSDG {
     fn parse_elem(element: &XmlEvent, reader: &mut EventReader<File>) -> Result<Self, String> {
         match element {
             XmlEvent::StartDocument { .. } => RVSDG::parse_elem(&reader.next().unwrap(), reader),
-            XmlEvent::Whitespace(_) => {
-                RVSDG::parse_elem(&reader.next().unwrap(), reader)
-            }
+            XmlEvent::Whitespace(_) => RVSDG::parse_elem(&reader.next().unwrap(), reader),
             XmlEvent::StartElement {
                 name: OwnedName { local_name, .. },
                 attributes,
