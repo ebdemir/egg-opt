@@ -48,7 +48,7 @@ fn main() {
     let file = fs::File::open(&args[1]).unwrap();
     let mut parser = EventReader::new(file);
     // let _src_rvsdg: String = fs::read_to_string(&args[1]).unwrap();
-    let rvsdg = RVSDG::<String>::parse(&mut parser);
+    let rvsdg = RVSDG::<EggIdWrapper>::parse(&mut parser);
 
     println!("{:?}", rvsdg);
 

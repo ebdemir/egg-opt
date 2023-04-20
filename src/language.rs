@@ -1,4 +1,10 @@
-use std::{collections::HashMap, fmt::Debug, fs::File};
+use std::{
+    collections::{hash_map::DefaultHasher, HashMap},
+    convert::Into,
+    fmt::Debug,
+    fs::File,
+    hash::{Hash, Hasher},
+};
 
 //use egg::Language;
 
@@ -8,7 +14,7 @@ use xml::{
     reader::{EventReader, XmlEvent},
 };
 
-#[derive(Debug, Clone, Hash)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub struct Attributes<Id: std::str::FromStr> {
     id: Id,
     name: Option<String>,
@@ -27,12 +33,12 @@ where
         }
         Attributes {
             id: Id::from_str(map["id"].as_str()).unwrap(),
-            name: if map.contains_key("name"){
+            name: if map.contains_key("name") {
                 Some(map["name"].clone())
             } else {
                 None
             },
-            ty: if map.contains_key("type"){
+            ty: if map.contains_key("type") {
                 Some(map["type"].clone())
             } else {
                 None
@@ -41,7 +47,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, Hash)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum RVSDG<Id: std::str::FromStr + Debug> {
     Rvsdg(Option<Vec<RVSDG<Id>>>),
     Node {
@@ -57,12 +63,53 @@ pub enum RVSDG<Id: std::str::FromStr + Debug> {
     Argument(Id), // id
 }
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
+pub struct EggIdWrapper {
+    id: egg::Id,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct EggIdParseErr;
+
+impl std::str::FromStr for EggIdWrapper {
+    type Err = EggIdParseErr;
+
+    fn from_str(s: &str) -> Result<EggIdWrapper, Self::Err> {
+        let mut hasher = DefaultHasher::new();
+        s.hash(&mut hasher);
+        let res = hasher.finish() as usize;
+        let egg_id: egg::Id = res.into();
+        Ok(EggIdWrapper { id: egg_id })
+    }
+}
+
 // TODO
-// impl egg::Language for RVSDG {
-// fn matches(&self, other: &Self) -> bool { unimplemented!() }
-// fn children(&self) -> &[egg::Id] { unimplemented!() }
-// fn children_mut(&mut self) -> &mut [egg::Id] { unimplemented!() }
-// }
+impl egg::Language for RVSDG<EggIdWrapper> {
+    fn matches(&self, other: &Self) -> bool {
+        match self {
+            Self::Rvsdg(_) => false,
+            Self::Node{ attr, body } => if let Self::Node { attr: other_attr, body: other_body } = other { attr.id.id == other_attr.id.id } else { false },
+            Self::Region(id, _, _) => if let Self::Region(other_id, _, _) = other { id.id == other_id.id } else { false },
+            Self::Edge(src, target) => if let Self::Edge(other_src, other_target) = other { src.id == other_src.id && target.id == other_target.id } else { false },
+            Self::Result(id) => if let Self::Result(other_id) = other { id.id == other_id.id } else { false },
+            Self::Input(id) => if let Self::Input(other_id) = other { id.id == other_id.id } else { false },
+            Self::Output(id) => if let Self::Output(other_id) = other { id.id == other_id.id } else { false },
+            Self::Argument(id) => if let Self::Argument(other_id) = other { id.id == other_id.id } else { false },
+        }
+    }
+// Not sure about how to handle edges here
+//    fn children(&self) -> &[egg::Id] {
+//        match self {
+//            Self::Rvsdg(Some(b)) 
+//            | Self::Node { attr ,  body: Some(b) } 
+//            | Self::Region(id, Some(b), res) =>  b.map(|e| e),
+//            _ => unreachable!()
+//        }
+//    }
+//    fn children_mut(&mut self) -> &mut [egg::Id] {
+//        unimplemented!()
+//    }
+}
 
 impl<Id: std::str::FromStr + Debug> RVSDG<Id>
 where
