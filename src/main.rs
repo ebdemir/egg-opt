@@ -1,7 +1,9 @@
 extern crate xml;
 
+mod rvsdg;
+use rvsdg::*;
+
 mod language;
-use language::*;
 
 // use egg::*;
 use std::{env, fs};
@@ -48,7 +50,7 @@ fn main() {
     let file = fs::File::open(&args[1]).unwrap();
     let mut parser = EventReader::new(file);
     // let _src_rvsdg: String = fs::read_to_string(&args[1]).unwrap();
-    let rvsdg = RVSDG::<EggIdWrapper>::parse(&mut parser);
+    let rvsdg = RVSDG::<language::EggIdWrapper>::parse(&mut parser);
 
     println!("{:?}", rvsdg);
 
