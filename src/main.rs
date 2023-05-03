@@ -5,7 +5,7 @@ use rvsdg::*;
 
 mod language;
 
-// use egg::*;
+use egg::*;
 use std::{env, fs};
 use xml::{
     attribute::OwnedAttribute,
@@ -52,6 +52,7 @@ fn main() {
     // let _src_rvsdg: String = fs::read_to_string(&args[1]).unwrap();
     let rvsdg = RVSDG::<language::EggIdWrapper>::parse(&mut parser);
 
-    println!("{:?}", rvsdg);
+    println!("RVSDG:\n{:?}\n", rvsdg.as_ref().unwrap());
+    println!("Children:\n{:?}\n", rvsdg.unwrap().children());
 
 }

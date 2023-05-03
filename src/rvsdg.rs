@@ -4,6 +4,7 @@ use crate::language::*;
 
 //use egg::Language;
 
+use egg::Language;
 use xml::{
     attribute::OwnedAttribute,
     name::OwnedName,
@@ -82,13 +83,14 @@ impl egg::Language for RVSDG<EggIdWrapper> {
         }
     }
     fn children(&self) -> &[egg::Id] {
-        todo!()
-        // let mut res: Vec<egg::Id> = Vec::new();
-        // match self {
-        //     Self::Rvsdg(Some(b))
-        //     | Self::Region(_, Some(b), _) => b.map(|e| e.get_id()),
-        //     _ => unreachable!(),
-        // }
+         match self {
+             Self::Rvsdg(Some(b))
+             | Self::Region(_, Some(b), _) => b.iter()
+                                               .map(|e| e.get_id())
+                                               .filter(|o| o.is_some())
+                                               .map(|e| e.unwrap().id).collect::<Vec<egg::Id>>().leak(),
+             _ => unreachable!(),
+        }
     }
     fn children_mut(&mut self) -> &mut [egg::Id] {
         todo!()
