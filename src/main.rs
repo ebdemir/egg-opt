@@ -1,6 +1,7 @@
 extern crate xml;
 
 mod rvsdg;
+use language::EggIdWrapper;
 use rvsdg::*;
 
 mod language;
@@ -50,9 +51,11 @@ fn main() {
     let file = fs::File::open(&args[1]).unwrap();
     let mut parser = EventReader::new(file);
     // let _src_rvsdg: String = fs::read_to_string(&args[1]).unwrap();
-    let rvsdg = RVSDG::<language::EggIdWrapper>::parse(&mut parser);
+    let mut rvsdg = RVSDG::parse(&mut parser).unwrap();
+    let mut children = rvsdg.children_mut();
+    children[0] = 42.into();
 
-    println!("RVSDG:\n{:?}\n", rvsdg.as_ref().unwrap());
-    println!("Children:\n{:?}\n", rvsdg.unwrap().children());
+    //println!("RVSDG:\n{:?}\n", rvsdg.as_ref().unwrap());
+    println!("Children:\n{:?}\n", rvsdg.children());
 
 }

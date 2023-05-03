@@ -1,10 +1,8 @@
-use std::{collections::HashMap, fmt::Debug, fs::File, hash::Hash};
+use std::{collections::{HashMap, hash_map::DefaultHasher}, fmt::Debug, fs::File, hash::{Hash, Hasher}};
 
 use crate::language::*;
 
-//use egg::Language;
-
-use egg::Language;
+use egg::{Id, Language};
 use xml::{
     attribute::OwnedAttribute,
     name::OwnedName,
@@ -12,16 +10,13 @@ use xml::{
 };
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
-pub struct Attributes<Id: std::str::FromStr> {
+pub struct Attributes {
     id: Id,
     name: Option<String>,
     ty: Option<String>, // type
 }
 
-impl<Id: std::str::FromStr + Debug> From<&Vec<OwnedAttribute>> for Attributes<Id>
-where
-    <Id as std::str::FromStr>::Err: Debug,
-{
+impl From<&Vec<OwnedAttribute>> for Attributes {
     fn from(attrs: &Vec<OwnedAttribute>) -> Self {
         let mut map = HashMap::<&str, String>::new();
 
@@ -29,7 +24,7 @@ where
             map.insert(attr.name.local_name.as_str(), attr.value.clone());
         }
         Attributes {
-            id: Id::from_str(map["id"].as_str()).unwrap(),
+            id: egg_id_from_str(map["id"].as_str()).unwrap(),
             name: if map.contains_key("name") {
                 Some(map["name"].clone())
             } else {
@@ -45,15 +40,15 @@ where
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
-pub enum RVSDG<Id: std::str::FromStr + Debug> {
-    Rvsdg(Option<Vec<RVSDG<Id>>>),
+pub enum RVSDG {
+    Rvsdg(Option<Box<[Id]>>),
     Node {
-        attr: Attributes<Id>,
-        body: Option<Vec<RVSDG<Id>>>, // body
+        attr: Attributes,
+        body: Option<Box<[Id]>>, // body
     },
-    Region(Id, Option<Vec<RVSDG<Id>>>, Option<Vec<RVSDG<Id>>>), // id, body, results
+    Region(Id, Option<Box<[Id]>>, Option<Box<[Id]>>), // id, body, results
 
-    Edge(Id, Id), // source and target id
+    Edge(Id, Id, Id), // edge, source, and target id
     Result(Id),   // id
     Input(Id),    // id
     Output(Id),   // id
@@ -61,7 +56,7 @@ pub enum RVSDG<Id: std::str::FromStr + Debug> {
 }
 
 // TODO
-impl egg::Language for RVSDG<EggIdWrapper> {
+impl egg::Language for RVSDG {
     fn matches(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Rvsdg(_), _) => false,
@@ -70,37 +65,33 @@ impl egg::Language for RVSDG<EggIdWrapper> {
                 Self::Node {
                     attr: other_attr, ..
                 },
-            ) => attr.id.id == other_attr.id.id,
-            (Self::Region(id, _, _), Self::Region(other_id, _, _)) => id.id == other_id.id,
-            (Self::Edge(src, target), Self::Edge(other_src, other_target)) => {
-                src.id == other_src.id && target.id == other_target.id
+            ) => attr.id == other_attr.id,
+            (Self::Region(id, _, _), Self::Region(other_id, _, _)) => id == other_id,
+            (Self::Edge(id, src, target), Self::Edge(other_id, other_src, other_target)) => {
+                id == other_id && src == other_src && target == other_target
             }
-            (Self::Result(id), Self::Result(other_id)) => id.id == other_id.id,
-            (Self::Input(id), Self::Input(other_id)) => id.id == other_id.id,
-            (Self::Output(id), Self::Output(other_id)) => id.id == other_id.id,
-            (Self::Argument(id), Self::Argument(other_id)) => id.id == other_id.id,
+            (Self::Result(id), Self::Result(other_id)) => id == other_id,
+            (Self::Input(id), Self::Input(other_id)) => id == other_id,
+            (Self::Output(id), Self::Output(other_id)) => id == other_id,
+            (Self::Argument(id), Self::Argument(other_id)) => id == other_id,
             _ => false,
         }
     }
     fn children(&self) -> &[egg::Id] {
-         match self {
-             Self::Rvsdg(Some(b))
-             | Self::Region(_, Some(b), _) => b.iter()
-                                               .map(|e| e.get_id())
-                                               .filter(|o| o.is_some())
-                                               .map(|e| e.unwrap().id).collect::<Vec<egg::Id>>().leak(),
-             _ => unreachable!(),
+        match self {
+            Self::Rvsdg(Some(b)) | Self::Region(_, Some(b), _) => &*b,
+            _ => &[],
         }
     }
     fn children_mut(&mut self) -> &mut [egg::Id] {
-        todo!()
+        match self {
+            Self::Rvsdg(Some(b)) | Self::Region(_, Some(b), _) => &mut *b,
+            _ => &mut [],
+        }
     }
 }
 
-impl<Id: std::str::FromStr + Debug> RVSDG<Id>
-where
-    <Id as std::str::FromStr>::Err: Debug,
-{
+impl RVSDG {
     fn get_id(&self) -> Option<&Id> {
         match self {
             Self::Node { attr, body } => Some(&attr.id),
@@ -108,13 +99,22 @@ where
             | Self::Input(id)
             | Self::Output(id)
             | Self::Result(id)
-            | Self::Argument(id) => Some(id),
+            | Self::Argument(id) 
+            | Self::Edge(id, _, _)=> Some(id),
             _ => None,
         }
     }
 
+    // this is stupid
+    fn gen_edge_id(src: &String, target: &String) -> Id {
+        let mut hasher = DefaultHasher::new();
+        (src.to_owned() + target).hash(&mut hasher);
+        let res = hasher.finish() as usize;
+        res.into()
+    }
+
     fn parse_rvsdg(reader: &mut EventReader<File>) -> Self {
-        let mut body: Vec<RVSDG<Id>> = Vec::new();
+        let mut body: Vec<Id> = Vec::new();
         loop {
             let e = reader.next();
             match e {
@@ -122,14 +122,15 @@ where
                     name: OwnedName { local_name, .. },
                 }) => {
                     if local_name == "rvsdg" {
-                        return RVSDG::Rvsdg(Some(body));
+                        let res: Box<[Id]> = body.into();
+                        return RVSDG::Rvsdg(Some(res));
                     }
                 }
                 Ok(XmlEvent::Whitespace(_)) => {
                     continue;
                 }
                 Ok(elem) => {
-                    body.push(RVSDG::parse_elem(&elem, reader).unwrap());
+                    body.push(*RVSDG::parse_elem(&elem, reader).unwrap().get_id().unwrap());
                 }
                 Err(_) => panic!("Error while parsing `RVSDG`"),
             }
@@ -137,8 +138,8 @@ where
     }
 
     fn parse_node(reader: &mut EventReader<File>, attributes: &Vec<OwnedAttribute>) -> Self {
-        let attr = Attributes::<Id>::from(attributes);
-        let mut body: Vec<RVSDG<Id>> = Vec::new();
+        let attr = Attributes::from(attributes);
+        let mut body: Vec<Id> = Vec::new();
         loop {
             let e = reader.next();
             match e {
@@ -153,11 +154,12 @@ where
                     continue;
                 }
                 Ok(elem) => {
-                    body.push(RVSDG::parse_elem(&elem, reader).unwrap());
+                    body.push(*RVSDG::parse_elem(&elem, reader).unwrap().get_id().unwrap());
                 }
                 Err(_) => panic!("Error while parsing `Node`"),
             }
         }
+        let body: Box<[Id]> = body.into();
         RVSDG::Node {
             attr,
             body: if body.is_empty() { None } else { Some(body) },
@@ -165,7 +167,7 @@ where
     }
     fn parse_region(reader: &mut EventReader<File>, attributes: &Vec<OwnedAttribute>) -> Self {
         let attr = Attributes::from(attributes);
-        let mut rest: Vec<RVSDG<Id>> = Vec::new();
+        let mut rest: Vec<RVSDG> = Vec::new();
         loop {
             let e = reader.next();
             match e {
@@ -185,14 +187,16 @@ where
                 Err(_) => panic!("Error while parsing `Region`"),
             }
         }
-        let mut results: Vec<RVSDG<Id>> = Vec::new();
-        let mut body: Vec<RVSDG<Id>> = Vec::new();
+        let mut results: Vec<Id> = Vec::new();
+        let mut body: Vec<Id> = Vec::new();
         for e in rest {
             match e {
-                RVSDG::Result(_) => results.push(e),
-                _ => body.push(e),
+                RVSDG::Result(_) => results.push(*e.get_id().unwrap()),
+                _ => body.push(*e.get_id().unwrap()),
             }
         }
+        let body: Box<[Id]> = body.into();
+        let results: Box<[Id]> = results.into();
         RVSDG::Region(
             attr.id,
             if body.is_empty() { None } else { Some(body) },
@@ -220,7 +224,11 @@ where
                         src = a.value.clone();
                     }
                 }
-                return RVSDG::Edge(Id::from_str(&src).unwrap(), Id::from_str(&target).unwrap());
+                return RVSDG::Edge(
+                    Self::gen_edge_id(&src, &target),
+                    egg_id_from_str(&src).unwrap(),
+                    egg_id_from_str(&target).unwrap(),
+                );
             }
         }
         unreachable!()

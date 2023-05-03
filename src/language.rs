@@ -1,6 +1,5 @@
-use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
-
+use std::hash::{Hash, Hasher};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub struct EggIdWrapper {
@@ -22,3 +21,10 @@ impl std::str::FromStr for EggIdWrapper {
     }
 }
 
+pub fn egg_id_from_str(s: &str) -> Result<egg::Id, String> {
+    let mut hasher = DefaultHasher::new();
+    s.hash(&mut hasher);
+    let res = hasher.finish() as usize;
+    let egg_id: egg::Id = res.into();
+    Ok(egg_id)
+}
