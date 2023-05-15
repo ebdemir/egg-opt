@@ -1,8 +1,6 @@
-use std::{collections::{HashMap, hash_map::DefaultHasher}, fmt::Debug, fs::File, hash::{Hash, Hasher}};
+use std::{collections::HashMap, fmt::Debug, fs::File, hash::Hash};
 
-use crate::language::*;
-
-use egg::{Id, Language};
+use egg::{define_language, EGraph, Id, Language};
 use xml::{
     attribute::OwnedAttribute,
     name::OwnedName,
@@ -11,7 +9,7 @@ use xml::{
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub struct Attributes {
-    id: Id,
+    id: String,
     name: Option<String>,
     ty: Option<String>, // type
 }
@@ -24,7 +22,7 @@ impl From<&Vec<OwnedAttribute>> for Attributes {
             map.insert(attr.name.local_name.as_str(), attr.value.clone());
         }
         Attributes {
-            id: egg_id_from_str(map["id"].as_str()).unwrap(),
+            id: map["id"].as_str().to_owned(),
             name: if map.contains_key("name") {
                 Some(map["name"].clone())
             } else {
@@ -38,82 +36,26 @@ impl From<&Vec<OwnedAttribute>> for Attributes {
         }
     }
 }
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
-pub enum RVSDG {
-    Rvsdg(Option<Box<[Id]>>),
-    Node {
-        attr: Attributes,
-        body: Option<Box<[Id]>>, // body
-    },
-    Region(Id, Option<Box<[Id]>>, Option<Box<[Id]>>), // id, body, results
-
-    Edge(Id, Id, Id), // edge, source, and target id
-    Result(Id),   // id
-    Input(Id),    // id
-    Output(Id),   // id
-    Argument(Id), // id
-}
-
-// TODO
-impl egg::Language for RVSDG {
-    fn matches(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Rvsdg(_), _) => false,
-            (
-                Self::Node { attr, .. },
-                Self::Node {
-                    attr: other_attr, ..
-                },
-            ) => attr.id == other_attr.id,
-            (Self::Region(id, _, _), Self::Region(other_id, _, _)) => id == other_id,
-            (Self::Edge(id, src, target), Self::Edge(other_id, other_src, other_target)) => {
-                id == other_id && src == other_src && target == other_target
-            }
-            (Self::Result(id), Self::Result(other_id)) => id == other_id,
-            (Self::Input(id), Self::Input(other_id)) => id == other_id,
-            (Self::Output(id), Self::Output(other_id)) => id == other_id,
-            (Self::Argument(id), Self::Argument(other_id)) => id == other_id,
-            _ => false,
-        }
-    }
-    fn children(&self) -> &[egg::Id] {
-        match self {
-            Self::Rvsdg(Some(b)) | Self::Region(_, Some(b), _) => &*b,
-            _ => &[],
-        }
-    }
-    fn children_mut(&mut self) -> &mut [egg::Id] {
-        match self {
-            Self::Rvsdg(Some(b)) | Self::Region(_, Some(b), _) => &mut *b,
-            _ => &mut [],
-        }
+define_language! {
+    pub enum RVSDG {
+        "rvsdg" = Rvsdg(Box<[Id]>),
+        "region" = Region(Box<[Id]>),
+        "node" = Node(Box<[Id]>),
+        "edge" = Edge([Id; 2]),
+        "result" = Result,
+        "input" = Input,
+        "output" = Output,
+        "arg" = Argument,
+        Symbol(egg::Symbol),
     }
 }
 
 impl RVSDG {
-    fn get_id(&self) -> Option<&Id> {
-        match self {
-            Self::Node { attr, body } => Some(&attr.id),
-            Self::Region(id, _, _)
-            | Self::Input(id)
-            | Self::Output(id)
-            | Self::Result(id)
-            | Self::Argument(id) 
-            | Self::Edge(id, _, _)=> Some(id),
-            _ => None,
-        }
-    }
-
-    // this is stupid
-    fn gen_edge_id(src: &String, target: &String) -> Id {
-        let mut hasher = DefaultHasher::new();
-        (src.to_owned() + target).hash(&mut hasher);
-        let res = hasher.finish() as usize;
-        res.into()
-    }
-
-    fn parse_rvsdg(reader: &mut EventReader<File>) -> Self {
+    fn parse_rvsdg(
+        reader: &mut EventReader<File>,
+        egraph: &mut EGraph<Self, ()>,
+        id_table: &mut HashMap<String, Id>,
+    ) -> Id {
         let mut body: Vec<Id> = Vec::new();
         loop {
             let e = reader.next();
@@ -122,22 +64,28 @@ impl RVSDG {
                     name: OwnedName { local_name, .. },
                 }) => {
                     if local_name == "rvsdg" {
-                        let res: Box<[Id]> = body.into();
-                        return RVSDG::Rvsdg(Some(res));
+                        let res: Box<[Id]> = body.clone().into();
+                        let expr = RVSDG::Rvsdg(res);
+                        egraph.add(expr.clone());
                     }
                 }
                 Ok(XmlEvent::Whitespace(_)) => {
                     continue;
                 }
                 Ok(elem) => {
-                    body.push(*RVSDG::parse_elem(&elem, reader).unwrap().get_id().unwrap());
+                    body.push(RVSDG::parse_elem(&elem, reader, egraph, id_table));
                 }
                 Err(_) => panic!("Error while parsing `RVSDG`"),
             }
         }
     }
 
-    fn parse_node(reader: &mut EventReader<File>, attributes: &Vec<OwnedAttribute>) -> Self {
+    fn parse_node(
+        reader: &mut EventReader<File>,
+        attributes: &Vec<OwnedAttribute>,
+        egraph: &mut EGraph<Self, ()>,
+        id_table: &mut HashMap<String, Id>,
+    ) -> Id {
         let attr = Attributes::from(attributes);
         let mut body: Vec<Id> = Vec::new();
         loop {
@@ -154,20 +102,27 @@ impl RVSDG {
                     continue;
                 }
                 Ok(elem) => {
-                    body.push(*RVSDG::parse_elem(&elem, reader).unwrap().get_id().unwrap());
+                    body.push(RVSDG::parse_elem(&elem, reader, egraph, id_table));
                 }
                 Err(_) => panic!("Error while parsing `Node`"),
             }
         }
+        println!("RecExpr: {:?}", egraph);
         let body: Box<[Id]> = body.into();
-        RVSDG::Node {
-            attr,
-            body: if body.is_empty() { None } else { Some(body) },
-        }
+        let expr = RVSDG::Node(body);
+        println!("Node children: {:?}", expr.children());
+        let id = egraph.add(expr.clone());
+        id_table.insert(attr.id, id);
+        id
     }
-    fn parse_region(reader: &mut EventReader<File>, attributes: &Vec<OwnedAttribute>) -> Self {
+    fn parse_region(
+        reader: &mut EventReader<File>,
+        attributes: &Vec<OwnedAttribute>,
+        egraph: &mut EGraph<Self, ()>,
+        id_table: &mut HashMap<String, Id>,
+    ) -> Id {
         let attr = Attributes::from(attributes);
-        let mut rest: Vec<RVSDG> = Vec::new();
+        let mut body: Vec<Id> = Vec::new();
         loop {
             let e = reader.next();
             match e {
@@ -182,33 +137,24 @@ impl RVSDG {
                     continue;
                 }
                 Ok(elem) => {
-                    rest.push(RVSDG::parse_elem(&elem, reader).unwrap());
+                    body.push(RVSDG::parse_elem(&elem, reader, egraph, id_table));
                 }
                 Err(_) => panic!("Error while parsing `Region`"),
             }
         }
-        let mut results: Vec<Id> = Vec::new();
-        let mut body: Vec<Id> = Vec::new();
-        for e in rest {
-            match e {
-                RVSDG::Result(_) => results.push(*e.get_id().unwrap()),
-                _ => body.push(*e.get_id().unwrap()),
-            }
-        }
         let body: Box<[Id]> = body.into();
-        let results: Box<[Id]> = results.into();
-        RVSDG::Region(
-            attr.id,
-            if body.is_empty() { None } else { Some(body) },
-            if results.is_empty() {
-                None
-            } else {
-                Some(results)
-            },
-        )
+        let expr = RVSDG::Region(body);
+        let id = egraph.add(expr.clone());
+        id_table.insert(attr.id, id);
+        id
     }
 
-    fn parse_edge(reader: &mut EventReader<File>, attributes: &Vec<OwnedAttribute>) -> Self {
+    fn parse_edge(
+        reader: &mut EventReader<File>,
+        attributes: &Vec<OwnedAttribute>,
+        egraph: &mut EGraph<Self, ()>,
+        id_table: &mut HashMap<String, Id>,
+    ) -> Id {
         let e = reader.next();
         if let Ok(XmlEvent::EndElement {
             name: OwnedName { local_name, .. },
@@ -224,11 +170,8 @@ impl RVSDG {
                         src = a.value.clone();
                     }
                 }
-                return RVSDG::Edge(
-                    Self::gen_edge_id(&src, &target),
-                    egg_id_from_str(&src).unwrap(),
-                    egg_id_from_str(&target).unwrap(),
-                );
+                let expr = RVSDG::Edge([id_table[&src], id_table[&target]]);
+                return egraph.add(expr.clone());
             }
         }
         unreachable!()
@@ -238,42 +181,56 @@ impl RVSDG {
         tag: &str,
         reader: &mut EventReader<File>,
         attributes: &Vec<OwnedAttribute>,
-    ) -> Self {
+        egraph: &mut EGraph<Self, ()>,
+        id_table: &mut HashMap<String, Id>,
+    ) -> Id {
         let e = reader.next();
         if let Ok(XmlEvent::EndElement {
             name: OwnedName { local_name, .. },
         }) = e
         {
             if local_name == tag {
-                return match tag {
-                    "result" => RVSDG::Result(Attributes::from(attributes).id),
-                    "input" => RVSDG::Input(Attributes::from(attributes).id),
-                    "output" => RVSDG::Output(Attributes::from(attributes).id),
-                    "argument" => RVSDG::Argument(Attributes::from(attributes).id),
+                let expr = match tag {
+                    "result" => RVSDG::Result,
+                    "input" => RVSDG::Input,
+                    "output" => RVSDG::Output,
+                    "argument" => RVSDG::Argument,
                     _ => {
                         unreachable!()
                     }
                 };
+                let id = egraph.add(expr.clone());
+                id_table.insert(Attributes::from(attributes).id, id);
+                return id;
             }
         }
         unreachable!()
     }
 
-    fn parse_elem(element: &XmlEvent, reader: &mut EventReader<File>) -> Result<Self, String> {
+    fn parse_elem(
+        element: &XmlEvent,
+        reader: &mut EventReader<File>,
+        egraph: &mut EGraph<Self, ()>,
+        id_table: &mut HashMap<String, Id>,
+    ) -> Id {
         match element {
-            XmlEvent::StartDocument { .. } => RVSDG::parse_elem(&reader.next().unwrap(), reader),
-            XmlEvent::Whitespace(_) => RVSDG::parse_elem(&reader.next().unwrap(), reader),
+            XmlEvent::StartDocument { .. } => {
+                RVSDG::parse_elem(&reader.next().unwrap(), reader, egraph, id_table)
+            }
+            XmlEvent::Whitespace(_) => {
+                RVSDG::parse_elem(&reader.next().unwrap(), reader, egraph, id_table)
+            }
             XmlEvent::StartElement {
                 name: OwnedName { local_name, .. },
                 attributes,
                 ..
             } => match local_name.as_str() {
-                "rvsdg" => Ok(RVSDG::parse_rvsdg(reader)),
-                "node" => Ok(RVSDG::parse_node(reader, &attributes)),
-                "region" => Ok(RVSDG::parse_region(reader, &attributes)),
-                "edge" => Ok(RVSDG::parse_edge(reader, &attributes)),
+                "rvsdg" => RVSDG::parse_rvsdg(reader, egraph, id_table),
+                "node" => RVSDG::parse_node(reader, &attributes, egraph, id_table),
+                "region" => RVSDG::parse_region(reader, &attributes, egraph, id_table),
+                "edge" => RVSDG::parse_edge(reader, &attributes, egraph, id_table),
                 "result" | "input" | "output" | "argument" => {
-                    Ok(RVSDG::parse_atom(&local_name, reader, &attributes))
+                    RVSDG::parse_atom(&local_name, reader, &attributes, egraph, id_table)
                 }
                 _ => {
                     unreachable!()
@@ -286,7 +243,11 @@ impl RVSDG {
         }
     }
 
-    pub fn parse(reader: &mut EventReader<File>) -> Result<Self, String> {
-        RVSDG::parse_elem(&reader.next().unwrap(), reader)
+    pub fn parse(reader: &mut EventReader<File>) -> Result<EGraph<Self, ()>, String> {
+        let mut egraph: EGraph<Self, ()> = Default::default();
+        let mut id_table: HashMap<String, Id> = HashMap::new();
+        let _ = RVSDG::parse_elem(&reader.next().unwrap(), reader, &mut egraph, &mut id_table);
+        egraph.rebuild();
+        Ok(egraph)
     }
 }

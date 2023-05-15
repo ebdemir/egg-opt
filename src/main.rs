@@ -1,11 +1,11 @@
 extern crate xml;
 
 mod rvsdg;
-use language::EggIdWrapper;
 use rvsdg::*;
 
 mod language;
 
+#[allow(unused_imports)]
 use egg::*;
 use std::{env, fs};
 use xml::{
@@ -21,7 +21,7 @@ fn print_xml(parser: EventReader<fs::File>) {
             Ok(XmlEvent::StartElement {
                 name, attributes, ..
             }) => {
-                //println!("Start -> Name: {}, Attr: {:?}", name, attributes);
+                println!("Start -> Name: {}, Attr: {:?}", name, attributes);
 
                 let attr: Vec<(String, String)> = attributes
                     .into_iter()
@@ -51,11 +51,10 @@ fn main() {
     let file = fs::File::open(&args[1]).unwrap();
     let mut parser = EventReader::new(file);
     // let _src_rvsdg: String = fs::read_to_string(&args[1]).unwrap();
-    let mut rvsdg = RVSDG::parse(&mut parser).unwrap();
-    let mut children = rvsdg.children_mut();
-    children[0] = 42.into();
+    let egraph = RVSDG::parse(&mut parser).unwrap();
+    //println!("RVSDG:\n{:?}\n", rvsdg);
+    println!("egraph:\n{:?}\n", egraph);
 
-    //println!("RVSDG:\n{:?}\n", rvsdg.as_ref().unwrap());
-    println!("Children:\n{:?}\n", rvsdg.children());
+    //println!("egraph:\n{:?}\n", rec_expr);
 
 }
